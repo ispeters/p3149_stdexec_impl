@@ -6,6 +6,7 @@
 #include <stdexec/__detail/__just.hpp>
 #include <stdexec/__detail/__let.hpp>
 #include <stdexec/__detail/__then.hpp>
+#include <exec/finally.hpp>
 
 #include "amre.hpp"
 
@@ -169,13 +170,15 @@ namespace stdexec {
                  }
                }
 
-               return self->event_.async_wait() | then([self]() noexcept {
-                        // this load-acquire is what ensures the joiner sees all the store-releases made by scoped
-                        // work as it finishes
-                        [[maybe_unused]]
-                        auto state = self->state_.fetch_and(~joining_, std::memory_order_acquire);
-                        assert(state == (closed_ | joining_));
-                      });
+               return self->event_.async_wait()
+                    | ::exec::finally(just(self) | then([](auto* self) noexcept {
+                                        // this load-acquire is what ensures the joiner sees all the store-releases
+                                        // made by scoped work as it finishes
+                                        [[maybe_unused]]
+                                        auto state = self->state_.fetch_and(
+                                          ~joining_, std::memory_order_acquire);
+                                        assert(state == (closed_ | joining_));
+                                      }));
              });
     }
 
