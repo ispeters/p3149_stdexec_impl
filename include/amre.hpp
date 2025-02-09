@@ -23,7 +23,7 @@ namespace stdexec {
 
     void set() noexcept {
       void* expected = nullptr;
-      if (!state_.compare_exchange_strong(expected, this, std::memory_order_acq_rel)) {
+      if (!state_.compare_exchange_strong(expected, this, std::memory_order_relaxed)) {
         // state_ must have been pointing to a base_op
         auto* op = static_cast<base_op*>(expected);
         op->complete_(op);
@@ -98,7 +98,7 @@ namespace stdexec {
 
     void start() & noexcept {
       void* expected = nullptr;
-      if (event_->state_.compare_exchange_strong(expected, this, std::memory_order_acq_rel)) {
+      if (event_->state_.compare_exchange_strong(expected, this, std::memory_order_relaxed)) {
         // successfully updated state_ to point to this, so we're now
         // waiting
       } else {

@@ -5,6 +5,7 @@
 #include <stdexec/stop_token.hpp>
 #include <stdexec/__detail/__just.hpp>
 #include <stdexec/__detail/__let.hpp>
+#include <stdexec/__detail/__then.hpp>
 
 #include "amre.hpp"
 
@@ -22,7 +23,7 @@ namespace stdexec {
         std::size_t newState;
 
         do {
-          if ((oldState | closed_) != 0u) {
+          if ((oldState & closed_) != 0u) {
             // the scope is closed to new work
             return false;
           }
@@ -43,7 +44,10 @@ namespace stdexec {
 
       void disassociate() const {
         // decrement the refcount
-        auto prevState = scope_->state_.fetch_sub(8u, std::memory_order_acq_rel);
+        //
+        // we need to ensure that this completion synchronizes with the eventual joiner, even if we're not the one
+        // to wake it up so we need release semantics here
+        auto prevState = scope_->state_.fetch_sub(8u, std::memory_order_release);
 
         // given some work just finished, the scope should require joining
         assert((prevState & needsJoin_) != 0u);
@@ -88,7 +92,7 @@ namespace stdexec {
 
           std::size_t expected = joining_ | needsJoin_;
           if (!scope_->state_.compare_exchange_strong(
-                expected, expected | closed_, std::memory_order_release)) {
+                expected, expected | closed_, std::memory_order_relaxed)) {
             // we failed to close the scope because the refcount was
             // incremented
             assert((expected >> 3) > 0u);
@@ -119,10 +123,15 @@ namespace stdexec {
     simple_counting_scope(simple_counting_scope&&) = delete;
 
     ~simple_counting_scope() {
-      auto state = state_.load(std::memory_order_acquire);
-      if ((state & needsJoin_) != 0u) {
-        std::terminate();
+      auto state = state_.load(std::memory_order_relaxed);
+
+      // if we're being destroyed without ever having been used then state should be 0; otherwise, the join sender
+      // has to have run to completion, which leaves us with all bits off except the closed_ bit
+      if (state == 0u || state == closed_) {
+        return;
       }
+
+      std::terminate();
     };
 
     token get_token() noexcept {
@@ -136,14 +145,37 @@ namespace stdexec {
 
     sender auto join() noexcept {
       return just(this) | let_value([](auto* self) {
-               auto state = self->state_.fetch_or(joining_, std::memory_order_acq_rel);
+               // we need to synchronize with any work that ran in this scope; we'll do that by turning off the
+               // joining_ bit with acquire semantics after waiting for the event to be set
+
+               // relaxed is ok because we don't need to synchronize with anything yet.
+               auto state = self->state_.fetch_or(joining_, std::memory_order_relaxed);
                assert((state & joining_) == 0u);
-               if ((state & closed_) != 0u && (state >> 3) == 0u) {
-                 // joining, closed, and no outstanding ops; set the event
-                 self->event_.set();
+
+               if ((state >> 3) == 0u) {
+                 // no outstanding work so we may be able to complete inline
+                 if ((state & closed_) != 0u) {
+                   // we're joining, we're closed, and there's no outstanding work
+                   self->event_.set();
+                 } else {
+                   // we expect the state to have the joining_ bit set because we just set it
+                   state |= joining_;
+
+                   // try to move to the terminal state
+                   if (self->state_.compare_exchange_strong(
+                         state, closed_ | joining_, std::memory_order_relaxed)) {
+                     self->event_.set();
+                   }
+                 }
                }
 
-               return self->event_.async_wait();
+               return self->event_.async_wait() | then([self]() noexcept {
+                        // this load-acquire is what ensures the joiner sees all the store-releases made by scoped
+                        // work as it finishes
+                        [[maybe_unused]]
+                        auto state = self->state_.fetch_and(~joining_, std::memory_order_acquire);
+                        assert(state == (closed_ | joining_));
+                      });
              });
     }
 
