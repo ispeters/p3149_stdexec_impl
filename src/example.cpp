@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "scope.hpp"
+#include "nest.hpp"
 
 namespace {
   template <bool Simple>
@@ -61,12 +62,26 @@ namespace {
 
     auto snd = token.wrap(stdexec::just());
 
-    if constexpr (!Simple) {
-      static_assert(stdexec::sender<decltype(snd)>);
-      static_assert(stdexec::sender_in<decltype(snd), stdexec::empty_env>);
-    }
+    static_assert(stdexec::sender<decltype(snd)>);
+    static_assert(stdexec::sender_in<decltype(snd), stdexec::empty_env>);
 
     stdexec::sync_wait(std::move(snd));
+  }
+
+  template <bool Simple>
+  void can_nest_just() {
+    scope_t<Simple> scope;
+
+    auto s = stdexec::nest(stdexec::just(), scope.get_token());
+
+    using sndr_t = decltype(s);
+    using csigs = decltype(stdexec::get_completion_signatures(s, stdexec::empty_env{}));
+
+    static_assert(stdexec::sender<sndr_t>);
+    static_assert(stdexec::sender_in<sndr_t, stdexec::empty_env>);
+
+    stdexec::sync_wait(std::move(s));
+    stdexec::sync_wait(scope.join());
   }
 
   template <bool Simple>
@@ -77,8 +92,12 @@ namespace {
     used_scope_joinable<Simple>();
     closed_empty_scope_joinable<Simple>();
     wrapped_just_runs<Simple>();
+    can_nest_just<Simple>();
   }
 } // namespace
+
+static_assert(stdexec::async_scope_token<stdexec::simple_counting_scope::token>);
+static_assert(stdexec::async_scope_token<stdexec::counting_scope::token>);
 
 int main() {
   run_examples<true>();

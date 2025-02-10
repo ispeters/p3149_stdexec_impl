@@ -93,7 +93,7 @@ namespace stdexec {
       };
 
       template <class _Self>
-      using __given_token_t = __data_of<_Self>;
+      using __given_token_t = std::remove_reference_t<__data_of<_Self>>;
 
       template <receiver _Receiver>
       using __rcvr_token_t = ::stdexec::stop_token_of_t<::stdexec::env_of_t<_Receiver>>;
