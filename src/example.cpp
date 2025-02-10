@@ -5,6 +5,7 @@
 
 #include "scope.hpp"
 #include "nest.hpp"
+#include "spawn.hpp"
 
 namespace {
   template <bool Simple>
@@ -85,6 +86,15 @@ namespace {
   }
 
   template <bool Simple>
+  void can_spawn_just() {
+    scope_t<Simple> scope;
+
+    stdexec::spawn(stdexec::just(), scope.get_token());
+
+    stdexec::sync_wait(scope.join());
+  }
+
+  template <bool Simple>
   void run_examples() {
     unused_scope_destructible<Simple>();
     closed_unused_scope_destructible<Simple>();
@@ -93,6 +103,7 @@ namespace {
     closed_empty_scope_joinable<Simple>();
     wrapped_just_runs<Simple>();
     can_nest_just<Simple>();
+    can_spawn_just<Simple>();
   }
 } // namespace
 
