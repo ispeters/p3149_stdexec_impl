@@ -1,50 +1,86 @@
 #include <stdexec/stop_token.hpp>
 #include <stdexec/__detail/__sync_wait.hpp>
+#include <stdexec/__detail/__just.hpp>
+#include <type_traits>
 
 #include "scope.hpp"
 
-void unused_scope_destructible() {
-  [[maybe_unused]]
-  stdexec::simple_counting_scope scope;
-}
+namespace {
+  template <bool Simple>
+  using scope_t =
+    std::conditional_t<Simple, stdexec::simple_counting_scope, stdexec::counting_scope>;
 
-void closed_unused_scope_destructible() {
-  stdexec::simple_counting_scope scope;
-
-  scope.close();
-}
-
-void empty_scope_joinable() {
-  stdexec::simple_counting_scope scope;
-  stdexec::sync_wait(scope.join());
-}
-
-void used_scope_joinable() {
-  stdexec::simple_counting_scope scope;
-
-  auto success = scope.get_token().try_associate();
-
-  assert(success);
-
-  if (success) {
-    scope.get_token().disassociate();
+  template <bool Simple>
+  void unused_scope_destructible() {
+    [[maybe_unused]]
+    scope_t<Simple> scope;
   }
 
-  stdexec::sync_wait(scope.join());
-}
+  template <bool Simple>
+  void closed_unused_scope_destructible() {
+    scope_t<Simple> scope;
 
-void closed_empty_scope_joinable() {
-  stdexec::simple_counting_scope scope;
+    scope.close();
+  }
 
-  scope.close();
+  template <bool Simple>
+  void empty_scope_joinable() {
+    scope_t<Simple> scope;
+    stdexec::sync_wait(scope.join());
+  }
 
-  stdexec::sync_wait(scope.join());
-}
+  template <bool Simple>
+  void used_scope_joinable() {
+    scope_t<Simple> scope;
+
+    auto success = scope.get_token().try_associate();
+
+    assert(success);
+
+    if (success) {
+      scope.get_token().disassociate();
+    }
+
+    stdexec::sync_wait(scope.join());
+  }
+
+  template <bool Simple>
+  void closed_empty_scope_joinable() {
+    scope_t<Simple> scope;
+
+    scope.close();
+
+    stdexec::sync_wait(scope.join());
+  }
+
+  template <bool Simple>
+  void wrapped_just_runs() {
+    scope_t<Simple> scope;
+
+    auto token = scope.get_token();
+
+    auto snd = token.wrap(stdexec::just());
+
+    if constexpr (!Simple) {
+      static_assert(stdexec::sender<decltype(snd)>);
+      static_assert(stdexec::sender_in<decltype(snd), stdexec::empty_env>);
+    }
+
+    stdexec::sync_wait(std::move(snd));
+  }
+
+  template <bool Simple>
+  void run_examples() {
+    unused_scope_destructible<Simple>();
+    closed_unused_scope_destructible<Simple>();
+    empty_scope_joinable<Simple>();
+    used_scope_joinable<Simple>();
+    closed_empty_scope_joinable<Simple>();
+    wrapped_just_runs<Simple>();
+  }
+} // namespace
 
 int main() {
-  unused_scope_destructible();
-  closed_unused_scope_destructible();
-  empty_scope_joinable();
-  used_scope_joinable();
-  closed_empty_scope_joinable();
+  run_examples<true>();
+  run_examples<false>();
 }

@@ -9,6 +9,7 @@
 #include <exec/finally.hpp>
 
 #include "amre.hpp"
+#include "stop_when.hpp"
 
 namespace stdexec {
 
@@ -195,14 +196,16 @@ namespace stdexec {
   struct counting_scope {
     struct token {
       template <sender Sender>
-      sender auto wrap(Sender&& snd); // TODO: mix a stop token into snd
+      sender auto wrap(Sender&& snd) {
+        return stop_when(static_cast<Sender&&>(snd), scope_->stopSource_.get_token());
+      }
 
       bool try_associate() const {
-        return scope_->get_token().try_associate();
+        return scope_->scope_.get_token().try_associate();
       }
 
       void disassociate() const {
-        scope_->get_token().disassociate();
+        scope_->scope_.get_token().disassociate();
       }
 
      private:

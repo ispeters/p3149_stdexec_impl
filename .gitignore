@@ -17,3 +17,4 @@ a.out
 sanitizer-ignorelist.txt
 *.swp
 example
+example.dSYM
